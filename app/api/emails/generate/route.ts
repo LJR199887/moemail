@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server"
 import { nanoid } from "nanoid"
 import { createDb } from "@/lib/db"
-import { emails } from "@/lib/schema"
-import { eq, and, gt, sql } from "drizzle-orm"
+import { emailShares, emails, messages, messageShares } from "@/lib/schema"
+import { eq, and, gt, sql, inArray } from "drizzle-orm"
 import { EXPIRY_OPTIONS } from "@/types/email"
 import { EMAIL_CONFIG } from "@/config"
 import { getRequestContext } from "@cloudflare/next-on-pages"
@@ -64,18 +64,40 @@ export async function POST(request: Request) {
     }
 
     const address = `${name || nanoid(8)}@${domain}`
+    const now = new Date()
     const existingEmail = await db.query.emails.findFirst({
       where: eq(sql`LOWER(${emails.address})`, address.toLowerCase())
     })
 
     if (existingEmail) {
-      return NextResponse.json(
-        { error: "该邮箱地址已被使用" },
-        { status: 409 }
-      )
+      if (existingEmail.expiresAt > now) {
+        return NextResponse.json(
+          { error: "\u8be5\u90ae\u7bb1\u5730\u5740\u5df2\u88ab\u4f7f\u7528" },
+          { status: 409 }
+        )
+      }
+
+      const expiredMessages = await db.query.messages.findMany({
+        where: eq(messages.emailId, existingEmail.id),
+        columns: { id: true }
+      })
+      const expiredMessageIds = expiredMessages.map(message => message.id)
+
+      if (expiredMessageIds.length > 0) {
+        await db.delete(messageShares)
+          .where(inArray(messageShares.messageId, expiredMessageIds))
+      }
+
+      await db.delete(emailShares)
+        .where(eq(emailShares.emailId, existingEmail.id))
+
+      await db.delete(messages)
+        .where(eq(messages.emailId, existingEmail.id))
+
+      await db.delete(emails)
+        .where(eq(emails.id, existingEmail.id))
     }
 
-    const now = new Date()
     const expires = expiryTime === 0 
       ? new Date('9999-01-01T00:00:00.000Z')
       : new Date(now.getTime() + expiryTime)
