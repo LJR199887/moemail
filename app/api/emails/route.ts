@@ -1,20 +1,98 @@
 import { createDb } from "@/lib/db"
-import { and, eq, gt, lt, or, sql } from "drizzle-orm"
+import { and, eq, gt, inArray, lt, or, sql } from "drizzle-orm"
 import { NextResponse } from "next/server"
-import { emails } from "@/lib/schema"
+import { emailShares, emails, messages, messageShares } from "@/lib/schema"
 import { encodeCursor, decodeCursor } from "@/lib/cursor"
 import { getUserId } from "@/lib/apiKey"
 
 export const runtime = "edge"
 
 const PAGE_SIZE = 20
+const DELETE_BATCH_SIZE = 100
+
+function chunkArray<T>(items: T[], size: number): T[][] {
+  const chunks: T[][] = []
+  for (let index = 0; index < items.length; index += size) {
+    chunks.push(items.slice(index, index + size))
+  }
+  return chunks
+}
+
+export async function DELETE(request: Request) {
+  const userId = await getUserId()
+
+  try {
+    const db = createDb()
+    const { ids } = await request.json<{ ids?: string[] }>()
+    const uniqueIds = Array.from(new Set(ids || [])).filter(Boolean)
+
+    if (uniqueIds.length === 0) {
+      return NextResponse.json(
+        { error: "No emails selected" },
+        { status: 400 }
+      )
+    }
+
+    const ownedEmailIds: string[] = []
+    for (const idChunk of chunkArray(uniqueIds, DELETE_BATCH_SIZE)) {
+      const ownedEmails = await db.query.emails.findMany({
+        where: and(
+          eq(emails.userId, userId!),
+          inArray(emails.id, idChunk)
+        ),
+        columns: { id: true }
+      })
+      ownedEmailIds.push(...ownedEmails.map(email => email.id))
+    }
+
+    if (ownedEmailIds.length === 0) {
+      return NextResponse.json(
+        { error: "No matching emails found" },
+        { status: 404 }
+      )
+    }
+
+    const messageIds: string[] = []
+    for (const emailIdChunk of chunkArray(ownedEmailIds, DELETE_BATCH_SIZE)) {
+      const emailMessages = await db.query.messages.findMany({
+        where: inArray(messages.emailId, emailIdChunk),
+        columns: { id: true }
+      })
+      messageIds.push(...emailMessages.map(message => message.id))
+    }
+
+    for (const messageIdChunk of chunkArray(messageIds, DELETE_BATCH_SIZE)) {
+      await db.delete(messageShares)
+        .where(inArray(messageShares.messageId, messageIdChunk))
+    }
+
+    for (const emailIdChunk of chunkArray(ownedEmailIds, DELETE_BATCH_SIZE)) {
+      await db.delete(emailShares)
+        .where(inArray(emailShares.emailId, emailIdChunk))
+
+      await db.delete(messages)
+        .where(inArray(messages.emailId, emailIdChunk))
+
+      await db.delete(emails)
+        .where(inArray(emails.id, emailIdChunk))
+    }
+
+    return NextResponse.json({ success: true, deleted: ownedEmailIds.length })
+  } catch (error) {
+    console.error('Failed to delete emails:', error)
+    return NextResponse.json(
+      { error: "Failed to delete emails" },
+      { status: 500 }
+    )
+  }
+}
 
 export async function GET(request: Request) {
   const userId = await getUserId()
 
   const { searchParams } = new URL(request.url)
   const cursor = searchParams.get('cursor')
-  
+
   const db = createDb()
 
   try {
@@ -51,9 +129,9 @@ export async function GET(request: Request) {
       ],
       limit: PAGE_SIZE + 1
     })
-    
+
     const hasMore = results.length > PAGE_SIZE
-    const nextCursor = hasMore 
+    const nextCursor = hasMore
       ? encodeCursor(
           results[PAGE_SIZE - 1].createdAt.getTime(),
           results[PAGE_SIZE - 1].id
@@ -61,7 +139,7 @@ export async function GET(request: Request) {
       : null
     const emailList = hasMore ? results.slice(0, PAGE_SIZE) : results
 
-    return NextResponse.json({ 
+    return NextResponse.json({
       emails: emailList,
       nextCursor,
       total: totalCount
@@ -73,4 +151,4 @@ export async function GET(request: Request) {
       { status: 500 }
     )
   }
-} 
+}

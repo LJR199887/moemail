@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server"
 import { createDb } from "@/lib/db"
-import { emails, messages } from "@/lib/schema"
-import { eq, and, lt, or, sql, ne, isNull } from "drizzle-orm"
+import { emailShares, emails, messages, messageShares } from "@/lib/schema"
+import { eq, and, lt, or, sql, ne, isNull, inArray } from "drizzle-orm"
 import { encodeCursor, decodeCursor } from "@/lib/cursor"
 import { getUserId } from "@/lib/apiKey"
 import { checkBasicSendPermission } from "@/lib/send-permissions"
@@ -30,12 +30,25 @@ export async function DELETE(
         { status: 403 }
       )
     }
+    const emailMessages = await db.query.messages.findMany({
+      where: eq(messages.emailId, id),
+      columns: { id: true }
+    })
+    const messageIds = emailMessages.map(message => message.id)
+
+    if (messageIds.length > 0) {
+      await db.delete(messageShares)
+        .where(inArray(messageShares.messageId, messageIds))
+    }
+
+    await db.delete(emailShares)
+      .where(eq(emailShares.emailId, id))
+
     await db.delete(messages)
       .where(eq(messages.emailId, id))
 
     await db.delete(emails)
       .where(eq(emails.id, id))
-
     return NextResponse.json({ success: true })
   } catch (error) {
     console.error('Failed to delete email:', error)
