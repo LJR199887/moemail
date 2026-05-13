@@ -5,7 +5,7 @@ import { useSession } from "next-auth/react"
 import { useTranslations } from "next-intl"
 import { CreateDialog } from "./create-dialog"
 import { ShareDialog } from "./share-dialog"
-import { Mail, RefreshCw, Trash2 } from "lucide-react"
+import { ArrowDownWideNarrow, ArrowUpWideNarrow, Mail, RefreshCw, Trash2 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -44,6 +44,8 @@ interface EmailResponse {
   total: number
 }
 
+type SortOrder = "desc" | "asc"
+
 export function EmailList({ onEmailSelect, selectedEmailId }: EmailListProps) {
   const { data: session } = useSession()
   const { config } = useConfig()
@@ -60,11 +62,13 @@ export function EmailList({ onEmailSelect, selectedEmailId }: EmailListProps) {
   const [batchDeleteOpen, setBatchDeleteOpen] = useState(false)
   const [batchDeleting, setBatchDeleting] = useState(false)
   const [selectedEmailIds, setSelectedEmailIds] = useState<Set<string>>(new Set())
+  const [sortOrder, setSortOrder] = useState<SortOrder>("desc")
   const { toast } = useToast()
 
   const fetchEmails = async (cursor?: string) => {
     try {
       const url = new URL("/api/emails", window.location.origin)
+      url.searchParams.set("sort", `createdAt:${sortOrder}`)
       if (cursor) {
         url.searchParams.set('cursor', cursor)
       }
@@ -72,21 +76,8 @@ export function EmailList({ onEmailSelect, selectedEmailId }: EmailListProps) {
       const data = await response.json() as EmailResponse
 
       if (!cursor) {
-        const newEmails = data.emails
-        const oldEmails = emails
-
-        const lastDuplicateIndex = newEmails.findIndex(
-          newEmail => oldEmails.some(oldEmail => oldEmail.id === newEmail.id)
-        )
-
-        if (lastDuplicateIndex === -1) {
-          setEmails(newEmails)
-          setNextCursor(data.nextCursor)
-          setTotal(data.total)
-          return
-        }
-        const uniqueNewEmails = newEmails.slice(0, lastDuplicateIndex)
-        setEmails([...uniqueNewEmails, ...oldEmails])
+        setEmails(data.emails)
+        setNextCursor(data.nextCursor)
         setTotal(data.total)
         return
       }
@@ -138,6 +129,14 @@ export function EmailList({ onEmailSelect, selectedEmailId }: EmailListProps) {
     await fetchEmails()
   }
 
+  const toggleSortOrder = () => {
+    setSortOrder(prev => prev === "desc" ? "asc" : "desc")
+    setEmails([])
+    setNextCursor(null)
+    setSelectedEmailIds(new Set())
+    setLoading(true)
+  }
+
   const handleScroll = useThrottle((e: React.UIEvent<HTMLDivElement>) => {
     if (loadingMore) return
 
@@ -153,7 +152,7 @@ export function EmailList({ onEmailSelect, selectedEmailId }: EmailListProps) {
 
   useEffect(() => {
     if (session) fetchEmails()
-  }, [session])
+  }, [session, sortOrder])
 
   const handleBatchDelete = async () => {
     const ids = Array.from(selectedEmailIds)
@@ -260,6 +259,19 @@ export function EmailList({ onEmailSelect, selectedEmailId }: EmailListProps) {
               className={cn("h-8 w-8", refreshing && "animate-spin")}
             >
               <RefreshCw className="h-4 w-4" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={toggleSortOrder}
+              title={sortOrder === "desc" ? t("sortNewestFirst") : t("sortOldestFirst")}
+              className="h-8 w-8"
+            >
+              {sortOrder === "desc" ? (
+                <ArrowDownWideNarrow className="h-4 w-4" />
+              ) : (
+                <ArrowUpWideNarrow className="h-4 w-4" />
+              )}
             </Button>
             <span className="text-xs text-gray-500">
               {role === ROLES.EMPEROR ? (

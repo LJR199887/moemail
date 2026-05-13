@@ -36,6 +36,8 @@
     "batchDeleteSuccess": "Deleted {count} emails",
     "batchDeleteFailed": "Failed to delete selected emails",
     "deleting": "Deleting...",
+    "sortNewestFirst": "Newest first",
+    "sortOldestFirst": "Oldest first",
     "error": "Error",
     "success": "Success"
   },

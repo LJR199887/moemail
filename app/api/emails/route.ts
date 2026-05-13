@@ -115,6 +115,7 @@ export async function GET(request: Request) {
 
   const { searchParams } = new URL(request.url)
   const cursor = searchParams.get('cursor')
+  const sort = searchParams.get('sort') === 'createdAt:asc' ? 'asc' : 'desc'
 
   const db = createDb()
 
@@ -133,23 +134,30 @@ export async function GET(request: Request) {
 
     if (cursor) {
       const { timestamp, id } = decodeCursor(cursor)
+      const cursorDate = new Date(timestamp)
       conditions.push(
-        or(
-          lt(emails.createdAt, new Date(timestamp)),
-          and(
-            eq(emails.createdAt, new Date(timestamp)),
-            lt(emails.id, id)
-          )
-        )
+        sort === 'asc'
+          ? or(
+              gt(emails.createdAt, cursorDate),
+              and(
+                eq(emails.createdAt, cursorDate),
+                gt(emails.id, id)
+              )
+            )
+          : or(
+              lt(emails.createdAt, cursorDate),
+              and(
+                eq(emails.createdAt, cursorDate),
+                lt(emails.id, id)
+              )
+            )
       )
     }
-
     const results = await db.query.emails.findMany({
       where: and(...conditions),
-      orderBy: (emails, { desc }) => [
-        desc(emails.createdAt),
-        desc(emails.id)
-      ],
+      orderBy: (emails, { asc, desc }) => sort === 'asc'
+        ? [asc(emails.createdAt), asc(emails.id)]
+        : [desc(emails.createdAt), desc(emails.id)],
       limit: PAGE_SIZE + 1
     })
 

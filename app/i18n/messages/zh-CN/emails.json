@@ -36,6 +36,8 @@
     "batchDeleteSuccess": "\u5df2\u5220\u9664 {count} \u4e2a\u90ae\u7bb1",
     "batchDeleteFailed": "\u5220\u9664\u6240\u9009\u90ae\u7bb1\u5931\u8d25",
     "deleting": "\u5220\u9664\u4e2d...",
+    "sortNewestFirst": "\u665a\u5230\u65e9",
+    "sortOldestFirst": "\u65e9\u5230\u665a",
     "error": "错误",
     "success": "成功"
   },
