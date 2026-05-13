@@ -8,6 +8,24 @@ import { checkBasicSendPermission } from "@/lib/send-permissions"
 
 export const runtime = "edge"
 
+function isMissingTableError(error: unknown) {
+  return error instanceof Error && /no such table/i.test(error.message)
+}
+
+async function ignoreMissingTable(operation: unknown) {
+  try {
+    await operation
+  } catch (error) {
+    if (!isMissingTableError(error)) {
+      throw error
+    }
+    console.warn('Skipping cleanup for missing table:', error)
+  }
+}
+
+function getErrorMessage(error: unknown, fallback: string) {
+  return error instanceof Error && error.message ? error.message : fallback
+}
 export async function DELETE(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
@@ -37,12 +55,16 @@ export async function DELETE(
     const messageIds = emailMessages.map(message => message.id)
 
     if (messageIds.length > 0) {
-      await db.delete(messageShares)
-        .where(inArray(messageShares.messageId, messageIds))
+      await ignoreMissingTable(
+        db.delete(messageShares)
+          .where(inArray(messageShares.messageId, messageIds))
+      )
     }
 
-    await db.delete(emailShares)
-      .where(eq(emailShares.emailId, id))
+    await ignoreMissingTable(
+      db.delete(emailShares)
+        .where(eq(emailShares.emailId, id))
+    )
 
     await db.delete(messages)
       .where(eq(messages.emailId, id))
@@ -53,7 +75,7 @@ export async function DELETE(
   } catch (error) {
     console.error('Failed to delete email:', error)
     return NextResponse.json(
-      { error: "删除邮箱失败" },
+      { error: getErrorMessage(error, "Failed to delete email") },
       { status: 500 }
     )
   }

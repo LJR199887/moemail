@@ -18,6 +18,25 @@ function chunkArray<T>(items: T[], size: number): T[][] {
   return chunks
 }
 
+function isMissingTableError(error: unknown) {
+  return error instanceof Error && /no such table/i.test(error.message)
+}
+
+async function ignoreMissingTable(operation: unknown) {
+  try {
+    await operation
+  } catch (error) {
+    if (!isMissingTableError(error)) {
+      throw error
+    }
+    console.warn('Skipping cleanup for missing table:', error)
+  }
+}
+
+function getErrorMessage(error: unknown, fallback: string) {
+  return error instanceof Error && error.message ? error.message : fallback
+}
+
 export async function DELETE(request: Request) {
   const userId = await getUserId()
 
@@ -62,13 +81,17 @@ export async function DELETE(request: Request) {
     }
 
     for (const messageIdChunk of chunkArray(messageIds, DELETE_BATCH_SIZE)) {
-      await db.delete(messageShares)
-        .where(inArray(messageShares.messageId, messageIdChunk))
+      await ignoreMissingTable(
+        db.delete(messageShares)
+          .where(inArray(messageShares.messageId, messageIdChunk))
+      )
     }
 
     for (const emailIdChunk of chunkArray(ownedEmailIds, DELETE_BATCH_SIZE)) {
-      await db.delete(emailShares)
-        .where(inArray(emailShares.emailId, emailIdChunk))
+      await ignoreMissingTable(
+        db.delete(emailShares)
+          .where(inArray(emailShares.emailId, emailIdChunk))
+      )
 
       await db.delete(messages)
         .where(inArray(messages.emailId, emailIdChunk))
@@ -81,7 +104,7 @@ export async function DELETE(request: Request) {
   } catch (error) {
     console.error('Failed to delete emails:', error)
     return NextResponse.json(
-      { error: "Failed to delete emails" },
+      { error: getErrorMessage(error, "Failed to delete emails") },
       { status: 500 }
     )
   }
